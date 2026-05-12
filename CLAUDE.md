@@ -315,7 +315,10 @@ Supplier ──> BidSupplier (一对多)
 
 ### 已知问题
 
-**后端热重载问题**：NestJS 的 `npm run start:dev` watch 模式有时不会正确检测文件更改并重新编译。如果代码修改后 API 没有生效，需要完全重启后端进程（Ctrl+C 后重新运行）。
+**后端热重载问题**：NestJS 的 `npm run start:dev` watch 模式有时不会正确检测文件更改并重新编译。如果代码修改后 API 没有生效：
+1. 检查控制台是否有编译错误
+2. 完全重启后端进程（`taskkill //F //IM node.exe` 后重新运行）
+3. 确认端口 3000 没有被旧进程占用（`netstat -an | grep :3000`）
 
 **TypeORM DECIMAL 聚合问题**：在某些聚合查询（SUM、GROUP BY）中，TypeORM/mysql2 可能返回格式异常的字符串（如 `"011700.009900.00"`）而非正确的数值。
 
@@ -340,7 +343,24 @@ for (const row of rawData) {
 2. **项目金额更新**：中标项目的总金额是动态计算的，任何供应商变更都会触发重新计算
 3. **咨询项目转中标**：转换后，咨询项目的 `hasBidProject` 和 `bidProjectId` 会自动更新
 
-4. **软删除注意事项**：
+4. **用户数据隔离（多租户）**：
+   - 这是一个**多租户系统**，非管理员用户只能访问自己创建的数据
+   - TypeORM QueryBuilder 会自动处理用户过滤（通过 `@User()` 装饰器注入的用户信息）
+   - **原生 SQL 查询必须手动添加用户过滤**，否则会返回所有用户的数据
+   - 检查清单：任何使用 `repository.query()` 或 `dataSource.query()` 的地方，都要确保添加了 `AND userId = ?` 或类似过滤条件
+   - 示例（payment.service.ts）：
+     ```typescript
+     // ✅ 正确：添加用户过滤
+     let rawQuery = `SELECT SUM(bs.amount) as total FROM ... WHERE ...`;
+     if (currentUser.role !== UserRole.ADMIN) {
+       rawQuery += ` AND bp.userId = '${currentUser.id}'`;
+     }
+
+     // ❌ 错误：缺少用户过滤，非管理员会看到所有用户的数据
+     let rawQuery = `SELECT SUM(bs.amount) as total FROM ... WHERE ...`;
+     ```
+
+5. **软删除注意事项**：
    - `BidProject` 支持软删除（有 `@DeleteDateColumn()`）
    - `BidProjectItem` 和 `BidSupplier` **不支持**软删除（使用 `onDelete: 'CASCADE'` 硬删除）
    - 统计查询时必须显式过滤 `deletedAt IS NULL`，否则会包含已删除项目的数据

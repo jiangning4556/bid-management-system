@@ -266,7 +266,7 @@ export class PaymentService {
     }
 
     // Use raw query to ensure deletedAt filter works correctly
-    const rawQuery = `
+    let rawQuery = `
       SELECT SUM(bs.amount) as total
       FROM bid_suppliers bs
       LEFT JOIN bid_project_items bpi ON bpi.id = bs.projectItemId
@@ -274,9 +274,19 @@ export class PaymentService {
       WHERE bs.isSelected = 1 AND bp.deletedAt IS NULL
     `;
 
+    // Add user filter for non-admin users
+    if (currentUser.role !== UserRole.ADMIN) {
+      rawQuery += ` AND bp.userId = '${currentUser.id}'`;
+    }
+
+    // Add project filter if specified
+    if (projectId) {
+      rawQuery += ` AND bp.id = '${projectId}'`;
+    }
+
     const rawResult = await this.paymentRecordRepository.query(rawQuery);
     totalPayable = parseFloat(rawResult[0]?.total || '0');
-    console.log('[PaymentService] totalPayable calculated (raw query):', totalPayable);
+    console.log('[PaymentService] totalPayable calculated (raw query):', totalPayable, 'for user:', currentUser.username);
 
     // Calculate totalPaid: sum of all payment records
     let totalPaid = 0;

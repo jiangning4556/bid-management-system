@@ -1,213 +1,123 @@
-# 投标管理系统 - 阿里云Windows服务器部署指南
+# 阿里云部署指南
 
-## 部署前准备
+## 目录
 
-### 服务器环境要求
-- Windows Server 2016/2019/2022
-- Node.js 18.x 或更高版本
-- MySQL 8.0 或更高版本
-- PM2（进程管理器）
-- IIS 或 Nginx（可选，用于反向代理）
+- [服务器要求](#服务器要求)
+- [域名配置](#域名配置)
+- [后端部署](#后端部署)
+- [前端部署](#前端部署)
+- [SSL 证书配置](#ssl-证书配置)
+- [部署验证](#部署验证)
+- [常见问题](#常见问题)
 
-### 本地准备
+## 服务器要求
+
+### 基础环境
+
+- **操作系统**: Ubuntu 20.04+ / CentOS 7+
+- **Node.js**: 18.x 或更高版本
+- **MySQL**: 8.0+
+- **Nginx**: 1.18+
+- **PM2**: 全局安装（用于进程管理）
+
+### 安装依赖
+
 ```bash
-# 确保本地项目可以正常运行
+# 更新系统
+sudo apt update && sudo apt upgrade -y
+
+# 安装 Node.js 18.x
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# 安装 MySQL
+sudo apt install -y mysql-server
+sudo mysql_secure_installation
+
+# 安装 Nginx
+sudo apt install -y nginx
+
+# 安装 PM2
+sudo npm install -g pm2
+
+# 安装 Git
+sudo apt install -y git
+```
+
+## 域名配置
+
+### DNS 解析设置
+
+在阿里云域名解析中添加以下记录：
+
+| 类型 | 主机记录 | 记录值 |
+|------|----------|--------|
+| A | www | 您的服务器 IP |
+| A | @ | 您的服务器 IP |
+| A | api | 您的服务器 IP |
+
+### 配置文件修改
+
+部署前需要修改以下域名配置：
+
+1. **backend/.env.production**
+   ```env
+   FRONTEND_URL=https://www.your-domain.com
+   ```
+
+2. **frontend2/.env.production**
+   ```env
+   VITE_API_URL=https://api.your-domain.com
+   ```
+
+3. **nginx-frontend.conf**
+   ```nginx
+   server_name www.your-domain.com your-domain.com;
+   ```
+
+4. **nginx-backend.conf**
+   ```nginx
+   server_name api.your-domain.com;
+   ```
+
+## 后端部署
+
+### 1. 创建项目目录
+
+```bash
+sudo mkdir -p /var/www/bid-management
+sudo chown -R $USER:$USER /var/www/bid-management
+cd /var/www/bid-management
+```
+
+### 2. 上传代码
+
+```bash
+# 使用 Git 克隆（推荐）
+git clone <your-repo-url> .
+
+# 或使用 SCP 上传
+scp -r ./bid-management-system/* user@your-server:/var/www/bid-management/
+```
+
+### 3. 配置环境变量
+
+```bash
 cd backend
+cp .env.production .env
+nano .env  # 修改数据库密码等配置
+```
+
+### 4. 安装依赖并构建
+
+```bash
 npm install
 npm run build
-npm run start:prod  # 测试生产版本
-
-cd ../frontend2
-npm install
-npm run build
-npm run preview  # 测试构建结果
 ```
 
----
+### 5. 初始化数据库
 
-## 第一步：修改配置文件
-
-### 1. 后端环境配置
-
-创建生产环境配置文件 `backend/.env.production`：
-
-```env
-# 应用配置
-NODE_ENV=production
-PORT=3000
-
-# 数据库配置（修改为服务器MySQL配置）
-DB_TYPE=mysql
-DB_HOST=localhost
-DB_PORT=3306
-DB_USERNAME=bid_management_user
-DB_PASSWORD=your_secure_password_here
-DB_DATABASE=bid_management
-
-# JWT配置（修改为强密码）
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production-min-32-chars
-JWT_EXPIRES_IN=7d
-JWT_REFRESH_EXPIRES_IN=30d
-
-# 文件上传配置
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=10485760
-```
-
-### 2. 前端API地址配置
-
-修改 `frontend2/src/utils/request.ts`，添加环境判断：
-
-```typescript
-const BASE_URL = import.meta.env.PROD
-  ? '/api'  // 生产环境使用相对路径，由Nginx/IIS代理
-  : '/api'  // 开发环境
-
-// 或根据环境变量
-const BASE_URL = process.env.VITE_API_URL || '/api'
-```
-
-### 3. 前端生产环境构建配置
-
-修改 `frontend2/vite.config.ts`：
-
-```typescript
-export default defineConfig({
-  plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
-    },
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-    },
-  },
-  build: {
-    outDir: 'dist',
-    assetsDir: 'assets',
-    sourcemap: false,
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,  // 生产环境移除console
-        drop_debugger: true,
-      },
-    },
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor': ['vue', 'vue-router', 'pinia'],
-          'element-plus': ['element-plus'],
-        },
-      },
-    },
-    chunkSizeWarningLimit: 1000,
-  },
-})
-```
-
----
-
-## 第二步：服务器环境配置
-
-### 1. 安装Node.js
-
-```powershell
-# 使用 Chocolatey 安装
-choco install nodejs-lts
-
-# 或从官网下载安装
-# https://nodejs.org/
-```
-
-### 2. 安装MySQL
-
-```powershell
-# 使用 Chocolatey 安装
-choco install mysql
-
-# 或从官网下载安装
-# https://dev.mysql.com/downloads/mysql/
-```
-
-### 3. 安装PM2
-
-```powershell
-npm install -g pm2
-npm install -g pm2-windows-startup
-pm2-startup install
-```
-
-### 4. 配置MySQL
-
-```sql
--- 创建数据库
-CREATE DATABASE bid_management CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- 创建用户
-CREATE USER 'bid_management_user'@'localhost' IDENTIFIED BY 'your_secure_password_here';
-
--- 授权
-GRANT ALL PRIVILEGES ON bid_management.* TO 'bid_management_user'@'localhost';
-FLUSH PRIVILEGES;
-```
-
----
-
-## 第三步：部署项目文件
-
-### 1. 上传项目文件到服务器
-
-将项目文件夹上传到服务器，例如：
-```
-C:\inetpub\wwwroot\bid-management-system
-```
-
-### 2. 安装依赖
-
-```powershell
-# 后端依赖
-cd C:\inetpub\wwwroot\bid-management-system\backend
-npm install --production
-
-# 前端依赖（如果需要在服务器上构建）
-cd ..\frontend2
-npm install --production
-```
-
-### 3. 创建生产环境配置文件
-
-```powershell
-# 复制并修改环境配置
-cd C:\inetpub\wwwroot\bid-management-system\backend
-copy .env .env.production
-notepad .env.production
-# 修改数据库密码和JWT密钥
-```
-
-### 4. 构建前端
-
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\frontend2
-npm run build
-# 构建产物在 dist 目录
-```
-
----
-
-## 第四步：初始化数据库
-
-### 1. 运行数据库迁移脚本
-
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\backend
-
+```bash
 # 创建数据库
 node scripts/create-database.js
 
@@ -215,367 +125,199 @@ node scripts/create-database.js
 node scripts/create-admin.js
 ```
 
-### 2. 或手动导入数据库结构
+### 6. 配置 PM2
 
-如果有SQL导出文件：
+```bash
+# 启动服务
+pm2 start ecosystem.config.json
 
-```powershell
-mysql -u root -p bid_management < database_schema.sql
-```
-
----
-
-## 第五步：配置PM2进程管理
-
-### 1. 创建PM2配置文件
-
-创建 `backend/ecosystem.config.js`：
-
-```javascript
-module.exports = {
-  apps: [
-    {
-      name: 'bid-management-backend',
-      script: 'dist/main.js',
-      cwd: 'C:\\inetpub\\wwwroot\\bid-management-system\\backend',
-      instances: 2,
-      exec_mode: 'cluster',
-      env: {
-        NODE_ENV: 'production',
-        PORT: 3000,
-      },
-      env_production: {
-        NODE_ENV: 'production',
-        PORT: 3000,
-      },
-      error_file: 'logs/error.log',
-      out_file: 'logs/out.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
-      merge_logs: true,
-      autorestart: true,
-      max_restarts: 10,
-      min_uptime: '10s',
-    },
-  ],
-}
-```
-
-### 2. 启动后端服务
-
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\backend
-pm2 start ecosystem.config.js
+# 保存 PM2 配置
 pm2 save
+
+# 设置开机自启
 pm2 startup
 ```
 
-### 3. PM2常用命令
+### 7. 配置 Nginx
 
-```powershell
-pm2 list              # 查看进程状态
-pm2 logs bid-management-backend --lines 100  # 查看日志
-pm2 restart bid-management-backend  # 重启服务
-pm2 stop bid-management-backend     # 停止服务
-pm2 delete bid-management-backend  # 删除进程
-pm2 monit                   # 实时监控
+```bash
+# 复制配置文件
+sudo cp nginx-backend.conf /etc/nginx/sites-available/bid-management-api
+
+# 创建软链接
+sudo ln -s /etc/nginx/sites-available/bid-management-api /etc/nginx/sites-enabled/
+
+# 测试配置
+sudo nginx -t
+
+# 重载 Nginx
+sudo systemctl reload nginx
 ```
 
----
+## 前端部署
 
-## 第六步：配置前端静态文件服务
+### 1. 配置环境变量
 
-### 方案一：使用IIS托管静态文件
-
-1. 打开IIS管理器
-2. 添加网站
-   - 网站名称: `bid-management-frontend`
-   - 物理路径: `C:\inetpub\wwwroot\bid-management-system\frontend2\dist`
-   - 绑定: `http:*:80`
-3. 配置URL重写规则（web.config）
-
-创建 `frontend2/dist/web.config`：
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<configuration>
-  <system.webServer>
-    <rewrite>
-      <rules>
-        <rule name="Handle History Mode and custom 404/405" stopProcessing="true">
-          <match url="(.*)" />
-          <conditions logicalGrouping="MatchAll">
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
-          </conditions>
-          <action type="Rewrite" url="index.html" />
-        </rule>
-      </rules>
-    </rewrite>
-    <staticContent>
-      <mimeMap fileExtension=".json" mimeType="application/json" />
-      <mimeMap fileExtension=".woff" mimeType="application/font-woff" />
-      <mimeMap fileExtension=".woff2" mimeType="application/font-woff2" />
-    </staticContent>
-    <httpProtocol>
-      <customHeaders>
-        <add name="Cache-Control" value="no-cache, no-store, must-revalidate" />
-      </customHeaders>
-    </httpProtocol>
-  </system.webServer>
-</configuration>
+```bash
+cd frontend2
+nano .env.production  # 修改 API 域名
 ```
 
-### 方案二：使用Nginx托管静态文件
+### 2. 安装依赖并构建
 
-1. 安装Nginx for Windows
-2. 配置 `nginx/conf/nginx.conf`：
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;  # 修改为你的域名或服务器IP
-
-    root C:/inetpub/wwwroot/bid-management-system/frontend2/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # 静态资源缓存
-    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-}
+```bash
+npm install
+npm run build
 ```
 
-3. 启动Nginx：
+### 3. 部署静态文件
 
-```powershell
-cd C:\nginx
-nginx.exe
+```bash
+# 创建前端目录
+sudo mkdir -p /var/www/bid-management/frontend
+
+# 复制构建文件
+sudo cp -r dist/* /var/www/bid-management/frontend/
+
+# 设置权限
+sudo chown -R www-data:www-data /var/www/bid-management/frontend
 ```
 
----
+### 4. 配置 Nginx
 
-## 第七步：配置防火墙
+```bash
+# 复制配置文件
+sudo cp nginx-frontend.conf /etc/nginx/sites-available/bid-management-frontend
 
-### 1. Windows防火墙入站规则
+# 创建软链接
+sudo ln -s /etc/nginx/sites-available/bid-management-frontend /etc/nginx/sites-enabled/
 
-允许以下端口：
-- **80** (HTTP)
-- **443** (HTTPS，如果使用SSL)
-- **3000** (后端API，如果需要直接访问)
+# 测试配置
+sudo nginx -t
 
-```powershell
-# 添加防火墙规则
-New-NetFirewallRule -DisplayName "HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
-New-NetFirewallRule -DisplayName "HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
-New-NetFirewallRule -DisplayName "Backend API" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
+# 重载 Nginx
+sudo systemctl reload nginx
 ```
 
-### 2. 阿里云安全组配置
-
-在阿里云控制台配置安全组规则，开放：
-- TCP 80
-- TCP 443
-- TCP 3000（如果需要直接访问后端API）
-
----
-
-## 第八步：SSL证书配置（可选但推荐）
+## SSL 证书配置
 
 ### 使用 Let's Encrypt 免费证书
 
-1. 安装 win-acme：
+```bash
+# 安装 Certbot
+sudo apt install -y certbot python3-certbot-nginx
 
-```powershell
-choco install win-acme
+# 获取证书（前端）
+sudo certbot --nginx -d www.your-domain.com -d your-domain.com
+
+# 获取证书（后端）
+sudo certbot --nginx -d api.your-domain.com
+
+# 设置自动续期
+sudo certbot renew --dry-run
 ```
 
-2. 申请证书：
+## 部署验证
 
-```powershell
-# 配置验证邮箱
-win-acme --server https://acme-v02.api.letsencrypt.org --email your-email@example.com
+### 1. 检查后端服务
 
-# 申请证书
-win-acme --issue manual --domain your-domain.com
-```
+```bash
+# PM2 状态
+pm2 status
 
-3. 在IIS中导入证书并绑定HTTPS
-
----
-
-## 第九步：部署后验证
-
-### 1. 检查服务状态
-
-```powershell
-# 检查后端服务
-pm2 list
-
-# 检查MySQL服务
-sc query MySQL80
-
-# 检查端口占用
-netstat -ano | findstr :80
-netstat -ano | findstr :3000
-```
-
-### 2. 测试访问
-
-1. 前端页面: `http://your-server-ip` 或 `http://your-domain.com`
-2. 后端API: `http://your-server-ip/api/health`（如果有健康检查端点）
-3. 登录测试: 使用 `admin/admin123` 登录
-
-### 3. 检查日志
-
-```powershell
-# PM2 日志
+# 查看日志
 pm2 logs bid-management-backend
 
-# IIS 日志
-C:\inetpub\logs\LogFiles
+# 测试 API
+curl https://api.your-domain.com/api/health
 ```
 
----
+### 2. 检查前端服务
 
-## 第十步：设置开机自启动
-
-### 1. PM2服务自启动
-
-```powershell
-pm2 startup
-pm2 save
+```bash
+# 访问前端
+curl -I https://www.your-domain.com
 ```
 
-### 2. MySQL服务自启动
+### 3. 功能测试
 
-```powershell
-sc config MySQL80 start=auto
+1. 访问 https://www.your-domain.com
+2. 使用默认账户登录：admin / admin123
+3. **重要**：登录后立即修改管理员密码
+
+## 常见问题
+
+### 1. 端口被占用
+
+```bash
+sudo netstat -tulpn | grep :3000
+sudo kill -9 <PID>
 ```
 
-### 3. IIS自启动
+### 2. MySQL 连接失败
 
-IIS默认已配置为自启动
+```bash
+sudo systemctl status mysql
+sudo mysql -u root -p
+```
 
----
+### 3. Nginx 502 错误
 
-## 常见问题排查
+```bash
+pm2 status
+pm2 logs
+sudo tail -f /var/log/nginx/error.log
+```
 
-### 1. 后端服务无法启动
+### 4. 文件上传失败
 
-```powershell
-# 查看详细日志
-pm2 logs bid-management-backend --lines 100
+```bash
+sudo mkdir -p /var/www/bid-management/uploads
+sudo chown -R www-data:www-data /var/www/bid-management/uploads
+sudo chmod -R 755 /var/www/bid-management/uploads
+```
 
-# 检查环境变量
-pm2 env bid-management-backend
+## 维护命令
 
-# 重启服务
+### 查看日志
+
+```bash
+# 后端日志
+pm2 logs bid-management-backend
+
+# Nginx 日志
+sudo tail -f /var/log/nginx/bid-management-api-access.log
+```
+
+### 重启服务
+
+```bash
+# 重启后端
 pm2 restart bid-management-backend
+
+# 重启 Nginx
+sudo systemctl restart nginx
 ```
 
-### 2. 前端页面空白
+### 更新部署
 
-- 检查浏览器控制台错误
-- 确认API地址配置正确
-- 检查IIS/Nginx配置
+```bash
+cd /var/www/bid-management
+chmod +x deploy.sh
 
-### 3. 数据库连接失败
+# 部署后端
+./deploy.sh backend
 
-- 检查MySQL服务状态
-- 验证数据库用户名密码
-- 确认防火墙允许3306端口
-
-### 4. 上传文件失败
-
-- 检查uploads目录权限
-- 确认MAX_FILE_SIZE配置
-- 检查IIS请求大小限制（默认30MB）
-
----
-
-## 更新部署
-
-### 后端更新
-
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\backend
-git pull  # 或上传新文件
-npm install --production
-npm run build
-pm2 restart bid-management-backend
+# 部署前端
+./deploy.sh frontend
 ```
 
-### 前端更新
+### 数据库备份
 
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\frontend2
-git pull  # 或上传新文件
-npm install --production
-npm run build
-# dist目录会自动更新，IIS会自动使用新文件
+```bash
+# 备份
+sudo mysqldump -u root -p bid_management > backup_$(date +%Y%m%d).sql
+
+# 恢复
+sudo mysql -u root -p bid_management < backup_20240101.sql
 ```
-
-### 数据库迁移
-
-```powershell
-cd C:\inetpub\wwwroot\bid-management-system\backend
-# 运行新的迁移脚本
-node scripts/migrate-xxx.js
-```
-
----
-
-## 备份策略
-
-### 1. 数据库备份
-
-```powershell
-# 创建备份脚本
-@echo off
-set BACKUP_DIR=C:\backups\bid-management
-set DATE=%date:~0,4%%date:~5,2%%date:~8,2%
-mysqldump -u bid_management_user -p bid_management > %BACKUP_DIR%\backup_%DATE%.sql
-```
-
-### 2. 配置计划任务
-
-使用Windows任务计划程序定期执行备份脚本
-
----
-
-## 监控和维护
-
-### 1. 性能监控
-
-使用PM2监控：
-
-```powershell
-pm2 monit
-```
-
-### 2. 日志管理
-
-定期清理日志文件，避免磁盘占满
-
-### 3. 安全维护
-
-- 定期更新Node.js和依赖包
-- 定期更新MySQL
-- 监控安全日志
-- 定期备份数据
